@@ -24,14 +24,35 @@ import {
   PolarRadiusAxis,
   Radar,
 } from "recharts"
-import type { Asset } from "@/app/clasificacion/page"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
+
+type ThreatRow = {
+  code: string
+  name: string
+  cells: {
+    D: number
+    I: number
+    C: number
+    A: number
+    T: number
+    RD: number
+    RI: number
+    RC: number
+    RA: number
+    RT: number
+  }
+}
+
+type AssetGroup = {
+  name: string
+  threats: ThreatRow[]
+}
 
 type DashboardStats = {
   totalAssets: number
   totalThreats: number
-  totalSafeguards: number
+  averageImpact: number
   averageRisk: number
   criticalRisks: number
   highRisks: number
@@ -40,11 +61,11 @@ type DashboardStats = {
 }
 
 export default function DashboardPage() {
-  const [assets, setAssets] = useState<Asset[]>([])
+  const [matrixData, setMatrixData] = useState<AssetGroup[]>([])
   const [stats, setStats] = useState<DashboardStats>({
     totalAssets: 0,
     totalThreats: 0,
-    totalSafeguards: 0,
+    averageImpact: 0,
     averageRisk: 0,
     criticalRisks: 0,
     highRisks: 0,
@@ -53,68 +74,128 @@ export default function DashboardPage() {
   })
 
   useEffect(() => {
-    const storedAssets = localStorage.getItem("magerit-assets")
-    if (storedAssets) {
-      const parsedAssets = JSON.parse(storedAssets)
-      setAssets(parsedAssets)
+    const stored = localStorage.getItem("magerit-matrix")
+    if (stored) {
+      const data: AssetGroup[] = JSON.parse(stored)
+      setMatrixData(data)
 
-      // Calculate stats
+      // Calculate statistics
+      let totalThreatsWithValues = 0
+      let totalImpact = 0
+      let totalRisk = 0
+      let critical = 0
+      let high = 0
+      let medium = 0
+      let low = 0
+
+      data.forEach((assetGroup) => {
+        assetGroup.threats.forEach((threat) => {
+          const avgImpact = (threat.cells.D + threat.cells.I + threat.cells.C + threat.cells.A + threat.cells.T) / 5
+          const riskDimensionsSum =
+            threat.cells.RD + threat.cells.RI + threat.cells.RC + threat.cells.RA + threat.cells.RT
+          const avgRisk = riskDimensionsSum > 0 ? riskDimensionsSum / 5 : avgImpact // Use impact as fallback
+
+          if (avgImpact > 0) {
+            totalThreatsWithValues++
+            totalImpact += avgImpact
+            totalRisk += avgRisk
+
+            if (avgImpact >= 8) critical++
+            else if (avgImpact >= 6) high++
+            else if (avgImpact >= 4) medium++
+            else if (avgImpact > 0) low++
+          }
+        })
+      })
+
       setStats({
-        totalAssets: parsedAssets.length,
-        totalThreats: 0,
-        totalSafeguards: 0,
-        averageRisk: 0,
-        criticalRisks: 0,
-        highRisks: 0,
-        mediumRisks: 0,
-        lowRisks: 0,
+        totalAssets: data.length,
+        totalThreats: totalThreatsWithValues,
+        averageImpact: totalThreatsWithValues > 0 ? totalImpact / totalThreatsWithValues : 0,
+        averageRisk: totalThreatsWithValues > 0 ? totalRisk / totalThreatsWithValues : 0,
+        criticalRisks: critical,
+        highRisks: high,
+        mediumRisks: medium,
+        lowRisks: low,
       })
     }
   }, [])
 
-  const assetsByType = assets.reduce(
-    (acc, asset) => {
-      acc[asset.tipo] = (acc[asset.tipo] || 0) + 1
-      return acc
-    },
-    {} as Record<string, number>,
-  )
-
-  const assetTypeData = Object.entries(assetsByType).map(([name, value]) => ({
-    name,
-    value,
-  }))
-
   const dimensionData =
-    assets.length > 0
-      ? [
-          {
-            dimension: "Disponibilidad",
-            promedio: (assets.reduce((acc, a) => acc + a.disponibilidad, 0) / assets.length).toFixed(1),
-          },
-          {
-            dimension: "Integridad",
-            promedio: (assets.reduce((acc, a) => acc + a.integridad, 0) / assets.length).toFixed(1),
-          },
-          {
-            dimension: "Confidencialidad",
-            promedio: (assets.reduce((acc, a) => acc + a.confidencialidad, 0) / assets.length).toFixed(1),
-          },
-          {
-            dimension: "Autenticidad",
-            promedio: (assets.reduce((acc, a) => acc + a.autenticidad, 0) / assets.length).toFixed(1),
-          },
-          {
-            dimension: "Trazabilidad",
-            promedio: (assets.reduce((acc, a) => acc + a.trazabilidad, 0) / assets.length).toFixed(1),
-          },
-        ]
+    matrixData.length > 0
+      ? (() => {
+          const totals = { D: 0, I: 0, C: 0, A: 0, T: 0, count: 0 }
+
+          matrixData.forEach((assetGroup) => {
+            assetGroup.threats.forEach((threat) => {
+              if (threat.cells.D + threat.cells.I + threat.cells.C + threat.cells.A + threat.cells.T > 0) {
+                totals.D += threat.cells.D
+                totals.I += threat.cells.I
+                totals.C += threat.cells.C
+                totals.A += threat.cells.A
+                totals.T += threat.cells.T
+                totals.count++
+              }
+            })
+          })
+
+          return [
+            { dimension: "Disponibilidad", promedio: totals.count > 0 ? (totals.D / totals.count).toFixed(1) : "0" },
+            { dimension: "Integridad", promedio: totals.count > 0 ? (totals.I / totals.count).toFixed(1) : "0" },
+            { dimension: "Confidencialidad", promedio: totals.count > 0 ? (totals.C / totals.count).toFixed(1) : "0" },
+            { dimension: "Autenticidad", promedio: totals.count > 0 ? (totals.A / totals.count).toFixed(1) : "0" },
+            { dimension: "Trazabilidad", promedio: totals.count > 0 ? (totals.T / totals.count).toFixed(1) : "0" },
+          ]
+        })()
       : []
 
   const radarData = dimensionData.map((d) => ({
     dimension: d.dimension.charAt(0),
     value: Number(d.promedio),
   }))
+
+  const assetTypeData = matrixData
+    .map((assetGroup) => {
+      const threatsWithValues = assetGroup.threats.filter((t) => {
+        const total =
+          t.cells.D +
+          t.cells.I +
+          t.cells.C +
+          t.cells.A +
+          t.cells.T +
+          t.cells.RD +
+          t.cells.RI +
+          t.cells.RC +
+          t.cells.RA +
+          t.cells.RT
+        return total > 0
+      }).length
+
+      return {
+        name: assetGroup.name,
+        value: threatsWithValues,
+      }
+    })
+    .filter((item) => item.value > 0)
+
+  const topCritical = (() => {
+    const items: Array<{ assetType: string; threatName: string; avgImpact: number }> = []
+
+    matrixData.forEach((assetGroup) => {
+      assetGroup.threats.forEach((threat) => {
+        const avgImpact = (threat.cells.D + threat.cells.I + threat.cells.C + threat.cells.A + threat.cells.T) / 5
+        if (avgImpact > 0) {
+          items.push({
+            assetType: assetGroup.name,
+            threatName: threat.name,
+            avgImpact,
+          })
+        }
+      })
+    })
+
+    return items.sort((a, b) => b.avgImpact - a.avgImpact).slice(0, 5)
+  })()
 
   const COLORS = [
     "oklch(0.6 0.2 250)",
@@ -123,14 +204,6 @@ export default function DashboardPage() {
     "oklch(0.68 0.16 90)",
     "oklch(0.72 0.14 60)",
   ]
-
-  const topAssets = [...assets]
-    .sort((a, b) => {
-      const avgA = (a.disponibilidad + a.integridad + a.confidencialidad + a.autenticidad + a.trazabilidad) / 5
-      const avgB = (b.disponibilidad + b.integridad + b.confidencialidad + b.autenticidad + b.trazabilidad) / 5
-      return avgB - avgA
-    })
-    .slice(0, 5)
 
   return (
     <div className="min-h-screen">
@@ -148,7 +221,7 @@ export default function DashboardPage() {
             </p>
           </div>
 
-          {assets.length === 0 ? (
+          {stats.totalThreats === 0 ? (
             <Card>
               <CardContent className="py-12">
                 <Empty className="border-0">
@@ -158,7 +231,8 @@ export default function DashboardPage() {
                     </EmptyMedia>
                     <EmptyTitle>No hay datos disponibles</EmptyTitle>
                     <EmptyDescription>
-                      Comienza clasificando activos para ver las estadísticas y visualizaciones del dashboard.
+                      Comienza clasificando activos y amenazas en la matriz para ver las estadísticas y visualizaciones
+                      del dashboard.
                     </EmptyDescription>
                   </EmptyHeader>
                   <div className="mt-6">
@@ -178,34 +252,34 @@ export default function DashboardPage() {
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-8">
                 <Card>
                   <CardHeader className="flex flex-row items-center justify-between pb-2">
-                    <CardTitle className="text-sm font-medium">Total Activos</CardTitle>
+                    <CardTitle className="text-sm font-medium">Tipos de Activos</CardTitle>
                     <Package className="h-4 w-4 text-muted-foreground" />
                   </CardHeader>
                   <CardContent>
                     <div className="text-2xl font-bold">{stats.totalAssets}</div>
-                    <p className="text-xs text-muted-foreground">Activos clasificados</p>
+                    <p className="text-xs text-muted-foreground">Categorías MAGERIT</p>
                   </CardContent>
                 </Card>
 
                 <Card>
                   <CardHeader className="flex flex-row items-center justify-between pb-2">
-                    <CardTitle className="text-sm font-medium">Amenazas</CardTitle>
+                    <CardTitle className="text-sm font-medium">Amenazas Valoradas</CardTitle>
                     <AlertTriangle className="h-4 w-4 text-muted-foreground" />
                   </CardHeader>
                   <CardContent>
                     <div className="text-2xl font-bold">{stats.totalThreats}</div>
-                    <p className="text-xs text-muted-foreground">Amenazas identificadas</p>
+                    <p className="text-xs text-muted-foreground">Con valores asignados</p>
                   </CardContent>
                 </Card>
 
                 <Card>
                   <CardHeader className="flex flex-row items-center justify-between pb-2">
-                    <CardTitle className="text-sm font-medium">Salvaguardas</CardTitle>
+                    <CardTitle className="text-sm font-medium">Impacto Promedio</CardTitle>
                     <Shield className="h-4 w-4 text-muted-foreground" />
                   </CardHeader>
                   <CardContent>
-                    <div className="text-2xl font-bold">{stats.totalSafeguards}</div>
-                    <p className="text-xs text-muted-foreground">Medidas implementadas</p>
+                    <div className="text-2xl font-bold">{stats.averageImpact.toFixed(1)}</div>
+                    <p className="text-xs text-muted-foreground">Valoración D-I-C-A-T</p>
                   </CardContent>
                 </Card>
 
@@ -216,7 +290,7 @@ export default function DashboardPage() {
                   </CardHeader>
                   <CardContent>
                     <div className="text-2xl font-bold">{stats.averageRisk.toFixed(1)}</div>
-                    <p className="text-xs text-muted-foreground">Nivel de riesgo general</p>
+                    <p className="text-xs text-muted-foreground">Riesgo residual</p>
                   </CardContent>
                 </Card>
               </div>
@@ -226,8 +300,8 @@ export default function DashboardPage() {
                 {/* Asset Distribution */}
                 <Card>
                   <CardHeader>
-                    <CardTitle>Distribución de Activos por Tipo</CardTitle>
-                    <CardDescription>Clasificación de activos según categorías MAGERIT</CardDescription>
+                    <CardTitle>Amenazas por Tipo de Activo</CardTitle>
+                    <CardDescription>Distribución de amenazas valoradas por categoría</CardDescription>
                   </CardHeader>
                   <CardContent>
                     <ResponsiveContainer width="100%" height={300}>
@@ -237,12 +311,12 @@ export default function DashboardPage() {
                           cx="50%"
                           cy="50%"
                           labelLine={false}
-                          label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                          label={({ name, percent }) => `${name.split(" ")[0]}: ${(percent * 100).toFixed(0)}%`}
                           outerRadius={80}
                           fill="#8884d8"
                           dataKey="value"
                         >
-                          {assetTypeData.map((entry, index) => (
+                          {assetTypeData.map((_entry, index) => (
                             <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                           ))}
                         </Pie>
@@ -272,7 +346,7 @@ export default function DashboardPage() {
                 </Card>
               </div>
 
-              {/* Radar Chart and Top Assets */}
+              {/* Radar Chart and Top Critical */}
               <div className="grid gap-6 md:grid-cols-2 mb-8">
                 {/* Radar Chart */}
                 <Card>
@@ -299,32 +373,29 @@ export default function DashboardPage() {
                   </CardContent>
                 </Card>
 
-                {/* Top Critical Assets */}
+                {/* Top Critical Threats */}
                 <Card>
                   <CardHeader>
-                    <CardTitle>Activos Más Críticos</CardTitle>
-                    <CardDescription>Top 5 activos con mayor valoración promedio</CardDescription>
+                    <CardTitle>Amenazas Más Críticas</CardTitle>
+                    <CardDescription>Top 5 combinaciones activo-amenaza con mayor riesgo</CardDescription>
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-4">
-                      {topAssets.map((asset) => {
-                        const avg =
-                          (asset.disponibilidad +
-                            asset.integridad +
-                            asset.confidencialidad +
-                            asset.autenticidad +
-                            asset.trazabilidad) /
-                          5
-                        const percentage = (avg / 10) * 100
+                      {topCritical.map((item, index) => {
+                        const percentage = (item.avgImpact / 10) * 100
                         return (
-                          <div key={asset.id} className="space-y-2">
+                          <div key={index} className="space-y-2">
                             <div className="flex items-center justify-between">
                               <div className="space-y-1">
-                                <p className="text-sm font-medium leading-none">{asset.nombre}</p>
-                                <p className="text-xs text-muted-foreground">{asset.tipo}</p>
+                                <p className="text-sm font-medium leading-none">{item.threatName}</p>
+                                <p className="text-xs text-muted-foreground">{item.assetType}</p>
                               </div>
-                              <Badge variant={avg >= 8 ? "destructive" : avg >= 6 ? "default" : "outline"}>
-                                {avg.toFixed(1)}
+                              <Badge
+                                variant={
+                                  item.avgImpact >= 8 ? "destructive" : item.avgImpact >= 6 ? "default" : "outline"
+                                }
+                              >
+                                {item.avgImpact.toFixed(1)}
                               </Badge>
                             </div>
                             <Progress value={percentage} className="h-2" />
@@ -399,13 +470,13 @@ export default function DashboardPage() {
                     <Button asChild variant="outline">
                       <Link href="/clasificacion">
                         <Package className="mr-2 h-4 w-4" />
-                        Gestionar Activos
+                        Gestionar Matriz
                       </Link>
                     </Button>
                     <Button asChild variant="outline">
                       <Link href="/analisis">
                         <AlertTriangle className="mr-2 h-4 w-4" />
-                        Analizar Amenazas
+                        Ver Análisis Detallado
                       </Link>
                     </Button>
                     <Button asChild variant="outline">
